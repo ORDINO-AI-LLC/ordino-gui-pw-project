@@ -1,5 +1,7 @@
 # ── Dependencies ────────────────────────────────────────────────────────────
 node_modules/
+jspm_packages/
+web_modules/
 
 # ── TypeScript / build ───────────────────────────────────────────────────────
 dist/
@@ -23,6 +25,7 @@ src/config/utils/admin.json
 auth/
 
 # ── Logs ──────────────────────────────────────────────────────────────────────
+logs
 *.log
 npm-debug.log*
 yarn-debug.log*
@@ -30,14 +33,52 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Node diagnostic reports (https://nodejs.org/api/report.html)
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
 # ── Test / coverage ───────────────────────────────────────────────────────────
 coverage/
+coverage
 .nyc_output/
+.nyc_output
 *.lcov
 
-# ── Allure (if enabled later) ───────────────────────────────────────────────
+# ── Allure (if enabled later) ────────────────────────────────────────────────
 allure-results/
 allure-report/
+
+# ── Bundlers / frameworks (future-proof) ─────────────────────────────────────
+.cache/
+.parcel-cache/
+.next/
+.nuxt/
+.vuepress/dist/
+.svelte-kit/
+.serverless/
+.temp/
+
+# ── Package manager ───────────────────────────────────────────────────────────
+.npm/
+.pnpm-store/
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+*.tgz
+.yarn-integrity
+
+# ── Linters / tooling caches ───────────────────────────────────────────────────
+.eslintcache
+.stylelintcache
+.grunt
+.lock-wscript
 
 # ── OS ────────────────────────────────────────────────────────────────────────
 .DS_Store
@@ -45,27 +86,30 @@ allure-report/
 ._*
 Thumbs.db
 Desktop.ini
+pids
+*.pid
+*.seed
+*.pid.lock
 
 # ── IDE / editors ─────────────────────────────────────────────────────────────
 .idea/
+.vscode/
+.vscode-test
 *.swp
 *.swo
 *~
 .project
 .classpath
 .settings/
+.tern-port
 
-# VSCode (uncomment below if you want to share launch.json / tasks)
-.vscode/
-
-# ── Misc caches & temp ────────────────────────────────────────────────────────
-.cache/
-.temp/
+# ── Misc ──────────────────────────────────────────────────────────────────────
 tmp/
 *.tmp
-.npm/
-.pnpm-store/
-.yarn/cache
-.yarn/unplugged
-.yarn/build-state.yml
-.yarn/install-state.gz
+*.local
+lib-cov
+bower_components
+.node_repl_history
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+vite.config.*.timestamp-*
