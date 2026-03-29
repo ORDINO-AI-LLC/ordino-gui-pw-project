@@ -1,0 +1,21 @@
+{
+  "name": "ordino-gui-pw-project",
+  "version": "1.0.0",
+  "description": "Ordino PW UI Test Automation",
+  "main": "index.js",
+  "scripts": {
+    "ui:headed": "playwright test --headed --project=chromium --workers=1 --trace on",
+    "ui:headless": "playwright test --project=chromium",
+    "ui:debug": "playwright test --debug",
+    "clean": "node -e \"const fs=require('fs'); ['test-results','playwright-report'].forEach(d => fs.rmSync(d,{recursive:true,force:true})); if(fs.existsSync('src/config/utils/admin.json')) fs.rmSync('src/config/utils/admin.json'); console.log('cleaned');\"",
+    "audit": "tsc --noEmit"
+  },
+  "author": "ordino-ai",
+  "license": "ISC",
+  "dependencies": {
+    "@playwright/test": "^1.55.1",
+    "@types/node": "^24.6.0",
+    "typescript": "^5.9.3",
+    "dotenv": "^17.3.1"
+  }
+}

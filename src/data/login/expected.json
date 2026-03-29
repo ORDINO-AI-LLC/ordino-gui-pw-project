@@ -1,0 +1,13 @@
+{
+  "_comment": "Expected UI text for login feature verification.",
+  "errors": {
+    "invalidCredentials": "Invalid credentials",
+    "requiredField": "Required",
+    "accountDisabled": "Account disabled"
+  },
+  "labels": {
+    "pageTitle": "OrangeHRM",
+    "loginButtonText": "Login",
+    "forgotPasswordLink": "Forgot your password?"
+  }
+}

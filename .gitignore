@@ -1,0 +1,71 @@
+# ── Dependencies ────────────────────────────────────────────────────────────
+node_modules/
+
+# ── TypeScript / build ───────────────────────────────────────────────────────
+dist/
+build/
+out/
+*.tsbuildinfo
+
+# ── Playwright ────────────────────────────────────────────────────────────────
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+.trace/
+
+# ── Secrets & generated auth (never commit) ─────────────────────────────────
+.env
+.env.*
+!.env.example
+# Storage state from global-setup (sessions / cookies)
+src/config/utils/admin.json
+auth/
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ── Test / coverage ───────────────────────────────────────────────────────────
+coverage/
+.nyc_output/
+*.lcov
+
+# ── Allure (if enabled later) ───────────────────────────────────────────────
+allure-results/
+allure-report/
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+Desktop.ini
+
+# ── IDE / editors ─────────────────────────────────────────────────────────────
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# VSCode (uncomment below if you want to share launch.json / tasks)
+.vscode/
+
+# ── Misc caches & temp ────────────────────────────────────────────────────────
+.cache/
+.temp/
+tmp/
+*.tmp
+.npm/
+.pnpm-store/
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz

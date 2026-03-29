@@ -1,0 +1,7 @@
+{
+  "_comment": "Expected UI text for dashboard feature verification.",
+  "labels": {
+    "pageTitle": "OrangeHRM",
+    "headerTitle": "Dashboard"
+  }
+}
