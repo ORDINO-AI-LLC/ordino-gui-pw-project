@@ -9,7 +9,6 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 1,
   workers: process.env.CI ? 1 : undefined,
 
-  globalSetup: './src/config/utils/global-setup',
   outputDir: './test-results/runs',
   preserveOutput: 'failures-only',
 

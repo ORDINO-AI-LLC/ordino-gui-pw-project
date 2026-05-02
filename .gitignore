@@ -20,8 +20,6 @@ out/
 .env
 .env.*
 !.env.example
-# Storage state from global-setup (sessions / cookies)
-src/config/utils/admin.json
 auth/
 
 # ── Logs ──────────────────────────────────────────────────────────────────────

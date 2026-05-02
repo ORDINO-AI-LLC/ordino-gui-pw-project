@@ -7,7 +7,7 @@
     "ui:headed": "playwright test --headed --project=chromium --workers=1 --trace on",
     "ui:headless": "playwright test --project=chromium",
     "ui:debug": "playwright test --debug",
-    "clean": "node -e \"const fs=require('fs'); ['test-results','playwright-report'].forEach(d => fs.rmSync(d,{recursive:true,force:true})); if(fs.existsSync('src/config/utils/admin.json')) fs.rmSync('src/config/utils/admin.json'); console.log('cleaned');\"",
+    "clean": "node -e \"const fs=require('fs'); ['test-results','playwright-report'].forEach(d => fs.rmSync(d,{recursive:true,force:true})); console.log('cleaned');\"",
     "audit": "tsc --noEmit"
   },
   "author": "ordino-ai",

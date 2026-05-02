@@ -1,13 +1,11 @@
 {
-  "_comment": "Test user credentials for login scenarios. Admin credentials can be overridden by .env ADMIN_USERNAME / ADMIN_PASSWORD.",
-  "users": {
-    "admin": {
-      "username": "Admin",
-      "password": "admin123"
-    },
-    "invalid": {
-      "username": "invalid_user",
-      "password": "wrong_password"
-    }
+  "_comment": "Test user credentials for login scenarios.",
+  "admin": {
+    "username": "Admin",
+    "password": "admin123"
+  },
+  "invalid": {
+    "username": "invalid_user",
+    "password": "wrong_password"
   }
 }

@@ -5,12 +5,7 @@ export { DashboardPage } from '../gui/pages/DashboardPage';
 // ── Panels ───────────────────────────────────────────────────
 export { HeaderPanel } from '../gui/panels/HeaderPanel';
 
-// ── Data Loaders ─────────────────────────────────────────────
-export { DataLoader } from './data/loaders/DataLoader';
-export { CredentialResolver } from './data/loaders/CredentialResolver';
-
-// ── Data Interfaces ──────────────────────────────────────────
-export * from './data/interfaces';
-
-// ── Logging & Decorators ─────────────────────────────────────
-export { logSuite, logTest, logField, logUrl, logSep, logSuccess, step } from './utils/decorators';
+// ── Test Data ────────────────────────────────────────────────
+export { default as users } from '../data/login/users.json';
+export { default as loginExpected } from '../data/login/expected.json';
+export { default as dashboardExpected } from '../data/dashboard/expected.json';

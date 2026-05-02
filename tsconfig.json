@@ -9,18 +9,15 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "experimentalDecorators": true,
-    "emitDecoratorMetadata": true,
     "types": ["node", "@playwright/test"],
-    "ignoreDeprecations": "6.0",
+    "ignoreDeprecations": "5.0",
     "baseUrl": ".",
     "paths": {
       "@pages/*": ["src/gui/pages/*"],
       "@panels/*": ["src/gui/panels/*"],
       "@config/*": ["src/config/*"],
       "@gui/*": ["src/gui/*"],
-      "@src/*": ["src/*"],
-      "@data/*": ["src/config/data/*"]
+      "@src/*": ["src/*"]
     }
   },
   "include": [

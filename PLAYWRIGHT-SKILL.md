@@ -1,940 +1,258 @@
-# Playwright Boilerplate Agent Skill
+---
+skill: playwright-page-object-suite
+title: Playwright Page-Object Test Suite Skill
+version: 3.1
+updated: 2026-05-02
+mime: text/markdown
+license: project-internal
+audience: |
+  A tester who has only:
+    (a) a BASE_URL of a target web application, and
+    (b) a list of test scenarios written in plain English.
+  No prior access to a reference project, no source code samples beyond what is in this file.
+  Following this document end-to-end MUST produce a runnable Playwright TypeScript suite
+  whose structure, naming, and conventions match this skill exactly.
+produces: |
+  A Playwright TypeScript project with:
+  - Strict Page Object Model (every page extends BasePage)
+  - Single-barrel imports through src/config/page-loader.ts
+  - Fluent chaining (every step_/verify_ method returns Promise<this>)
+  - JSON-backed test data consumed via typed module imports
+  - No custom logger, no method decorator, no globalSetup, no auth-storage files
+prerequisites:
+  runtime:
+    - Node.js >= 20
+    - npm
+  configuration:
+    - .env file containing BASE_URL=<target_app_url>
+non_goals:
+  - API testing (this skill is UI-only)
+  - Cross-browser matrix (chromium-only by default)
+anchors:
+  contract:    "#sec-contract"
+  bootstrap:   "#sec-bootstrap"
+  rules:       "#sec-rules"
+  layout:      "#sec-layout"
+  config:      "#sec-config"
+  framework:   "#sec-framework"
+  page-object: "#sec-page-object"
+  panel:       "#sec-panel"
+  data:        "#sec-data"
+  spec:        "#sec-spec"
+  naming:      "#sec-naming"
+  decisions:   "#sec-decisions"
+  mapping:     "#sec-mapping"
+  worked:      "#sec-worked"
+  add-feature: "#sec-add-feature"
+  anti:        "#sec-anti"
+  validate:    "#sec-validate"
+---
 
-**Version:** 2.1
-**Last Updated:** March 25, 2026
-**Scope:** Test generation, code review, and project scaffolding for Playwright QA automation
+# Playwright Page-Object Test Suite Skill
+
+> **Resource self-description.** This is a complete, standalone authoring standard for Playwright UI tests in the page-object style. A tester who has never seen the reference codebase MUST be able to read this file, plus a `.env` containing `BASE_URL` and a list of natural-language scenarios, and produce a project that matches this skill exactly. The non-negotiable rules and templates are normative; example names (`LoginPage`, `users.admin`) are illustrative — substitute for the target application.
 
 ---
 
-## Executive Summary
+## 0. Application contract <a id="sec-contract"></a>
 
-This skill file ensures AI coding agents (Claude, GitHub Copilot, Cursor) and new team members generate Playwright tests that strictly adhere to this project's architecture, conventions, and best practices.
+Code produced under this skill MUST satisfy all of:
 
-**Key Principle:** The boilerplate is the single source of truth. All new code must mirror its structure, conventions, and patterns exactly.
+- **C1.** Every page class extends `BasePage` (defined in §[framework](#sec-framework)).
+- **C2.** Every action method is named `step_<verb>`; every assertion method is named `verify_<thing>`. Both are `async` and return `Promise<this>`.
+- **C3.** Every spec file has exactly two `import` lines: `test` from `src/config/page.config`, plus barrel imports from `src/config/page-loader`. No deep imports into `src/`.
+- **C4.** `src/config/page-loader.ts` contains only single-line `export ... from '...'` statements. No `import` plus derived `export const` patterns.
+- **C5.** Every page object accessed in a test is provided as a Playwright fixture in `src/config/page.config.ts`. Tests never call `new <Page>(page)` directly.
+- **C6.** All test data is JSON under `src/data/<feature>/`, imported via the barrel as the file's own top-level shape (no wrapper objects, no runtime loaders).
+- **C7.** No custom logger, no method decorator, no `globalSetup`, no `authenticatedPage` fixture, no `DataLoader` / `CredentialResolver` classes. (See §[anti](#sec-anti).)
+- **C8.** Fixture destructure lists and any function parameter list stay on a single line — never broken vertically.
+- **C9.** The only secret/configuration source is `.env`. Read via `process.env.X`. No hardcoded URLs or credentials in code.
+- **C10.** `npm run audit` (`tsc --noEmit`) returns clean, and the validation recipes in §[validate](#sec-validate) all pass.
 
-**Who this is for:**
-- AI agents generating or reviewing test code
-- New team members writing their first tests
-- PR reviewers checking test quality
+A piece of code that violates any contract clause does not conform.
 
 ---
 
-## 1. Project Architecture & File Structure
+## 1. Bootstrap from an empty directory <a id="sec-bootstrap"></a>
 
-### 1.1 Directory Hierarchy
+Run these commands top-to-bottom in an empty folder. They produce a runnable shell — scenario-specific files come later (§[mapping](#sec-mapping), §[worked](#sec-worked)).
+
+### 1.1 Commands
+
+```bash
+mkdir <project-name> && cd <project-name>
+npm init -y
+npm install -D @playwright/test typescript @types/node dotenv
+npx playwright install chromium
+mkdir -p src/config src/data src/gui/pages src/gui/panels features
+```
+
+### 1.2 `.env` (root)
+
+```
+BASE_URL=https://your-target-app.example.com
+```
+
+`.env` is the **only** source of environment-specific config. If the target requires credentials that must not be committed, add them here too (e.g. `ADMIN_PASSWORD=...`) and read via `process.env.X` at the consumption site.
+
+### 1.3 `.gitignore` (root)
+
+```
+# ── Node / build ──────────────────────────────────────────────
+node_modules
+
+# ── Playwright outputs ────────────────────────────────────────
+test-results
+playwright-report
+
+# ── Environment / secrets ─────────────────────────────────────
+.env
+.env.*
+!.env.example
+auth/
+
+# ── Logs ──────────────────────────────────────────────────────
+*.log
+```
+
+### 1.4 `package.json` (root)
+
+Replace what `npm init -y` produced with:
+
+```json
+{
+  "name": "<project-name>",
+  "version": "1.0.0",
+  "description": "Playwright UI Test Automation",
+  "scripts": {
+    "ui:headed":   "playwright test --headed --project=chromium --workers=1 --trace on",
+    "ui:headless": "playwright test --project=chromium",
+    "ui:debug":    "playwright test --debug",
+    "clean":       "node -e \"const fs=require('fs'); ['test-results','playwright-report'].forEach(d => fs.rmSync(d,{recursive:true,force:true})); console.log('cleaned');\"",
+    "audit":       "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.1",
+    "@types/node":       "^24.6.0",
+    "typescript":        "^5.9.3",
+    "dotenv":            "^17.3.1"
+  }
+}
+```
+
+### 1.5 Create root config files
+
+Create `tsconfig.json` and `playwright.config.ts` in the project root using the verbatim contents of §[config](#sec-config).
+
+### 1.6 Create framework files
+
+Create the three framework files using the verbatim contents of §[framework](#sec-framework):
+
+- `src/config/page-loader.ts`
+- `src/config/page.config.ts`
+- `src/gui/pages/BasePage.ts`
+
+At first creation, `page-loader.ts` and `page.config.ts` will reference page objects you have not built yet — that is expected. Each new page added in §[mapping](#sec-mapping) appends one line to each.
+
+### 1.7 Sanity check
+
+```bash
+npm run audit
+```
+
+Must pass before writing any feature code. If it fails, the framework files are wrong — re-copy from §[framework](#sec-framework).
+
+---
+
+## 2. Non-negotiable rules <a id="sec-rules"></a>
+
+1. **Pages extend `BasePage`.** No exceptions.
+2. **Pages and panels return `Promise<this>`** from every `step_*` and `verify_*` method, except read getters that return data.
+3. **Method names are prefixed.** `step_*` for actions. `verify_*` for assertions.
+4. **Tests live only in `features/`.** Never `tests/`, `specs/`, or `__tests__/`.
+5. **Spec files have exactly two imports.** `test` from `page.config`, everything else from `page-loader`.
+6. **`page-loader.ts` is the only barrel.** Single-line `export ... from '...'` statements only — no `import` plus derived `export const`.
+7. **Test data is JSON under `src/data/<feature>/`.** Specs consume it via the barrel; never `fs` or a runtime loader.
+8. **Configuration comes from `.env`.** No hardcoded URLs or credentials in code.
+9. **Fixtures construct page objects.** Tests destructure them — never `new PageObject(page)` inside a test.
+10. **Single-line parameter lists.** Fixture destructure (`async ({ a, b, c, d, e }) => {`) and any other function parameter list stay on one line, no matter how long. Multi-line vertical layouts of parameters are forbidden.
+11. **No custom logger, no `@step` decorator, no global-setup.** Use Playwright's reporters and `await test.step(...)` if you need observable steps.
+
+---
+
+## 3. Project layout <a id="sec-layout"></a>
 
 ```
 project-root/
-├── .env                              # Configuration (BASE_URL, credentials) — tracked in git
-├── .gitignore                        # Excludes node_modules, test-results, auth state
-├── playwright.config.ts              # Playwright configuration (dotenv loaded here)
-├── tsconfig.json                     # TypeScript compiler with path aliases
-├── package.json                      # Scripts, dependencies (Playwright, TS, dotenv)
-├── PLAYWRIGHT-SKILL.md               # This file — AI agent & team guidelines
+├── .env                            # BASE_URL and any feature-specific secrets
+├── .gitignore
+├── playwright.config.ts
+├── tsconfig.json
+├── package.json
+├── PLAYWRIGHT-SKILL.md             # this file
 │
 ├── src/
 │   ├── config/
-│   │   ├── page-loader.ts            # Barrel export registry for all page objects & panels
-│   │   ├── page.config.ts            # Fixture definitions (loginPage, dashboardPage, authenticatedPage)
-│   │   └── utils/
-│   │       ├── global-setup.ts       # Pre-test authentication (runs once before all tests)
-│   │       ├── decorators.ts         # @step decorator & logging utilities (logSuite, logTest, etc.)
-│   │       └── admin.json            # Auto-generated auth session state (gitignored via clean script)
+│   │   ├── page-loader.ts          # single barrel: pages + panels + JSON data
+│   │   └── page.config.ts          # extends Playwright `test` with page-object fixtures
 │   │
-│   ├── config/
-│   │   ├── data/                      # Test data source code (interfaces + loaders)
-│   │   │   ├── interfaces/            # TypeScript shape definitions (type safety)
-│   │   │   │   ├── common.interfaces.ts  # DataSet<T> generic type
-│   │   │   │   ├── login.interfaces.ts   # LoginCredentials, LoginUsersFile, LoginExpectedFile
-│   │   │   │   ├── dashboard.interfaces.ts # DashboardExpectedFile
-│   │   │   │   └── index.ts              # Barrel export
-│   │   │   └── loaders/               # Data access layer
-│   │   │       ├── DataLoader.ts      # Generic JSON reader with cache
-│   │   │       ├── CredentialResolver.ts # User credential resolver (JSON + .env override)
-│   │   │       └── index.ts           # Barrel export
-│   │
-│   ├── data/                          # TESTER-EDITABLE — JSON only, no TypeScript
-│   │   ├── login/
-│   │   │   ├── users.json            # Test user credentials (admin, invalid, etc.)
-│   │   │   └── expected.json         # Expected UI text (error messages, labels)
-│   │   └── dashboard/
-│   │       └── expected.json         # Expected titles, labels
+│   ├── data/
+│   │   └── <feature>/              # one folder per feature
+│   │       ├── users.json          # only for features that need credentials
+│   │       └── expected.json       # expected UI text / labels / errors
 │   │
 │   └── gui/
 │       ├── pages/
-│       │   ├── BasePage.ts           # Abstract base class — all pages extend this
-│       │   ├── LoginPage.ts          # Login workflow page object
-│       │   ├── DashboardPage.ts      # Dashboard page object (composes HeaderPanel)
-│       │   └── [NewPage].ts          # Additional pages follow same pattern
-│       │
+│       │   ├── BasePage.ts         # do not modify casually
+│       │   └── <Feature>Page.ts    # one file per application page
 │       └── panels/
-│           ├── HeaderPanel.ts        # Reusable header/profile dropdown component
-│           └── [NewPanel].ts         # Additional reusable UI components
+│           └── <Name>Panel.ts      # reusable composed UI region (e.g. header)
 │
 └── features/
-    ├── login.spec.ts                 # Login test scenarios (clears auth state)
-    ├── home.spec.ts                  # Dashboard test scenarios (uses authenticatedPage)
-    └── [feature].spec.ts             # Additional feature tests
+    └── <feature>.spec.ts           # one file per feature; uses fixtures only
 ```
 
-### 1.2 Non-Negotiable Architecture Rules
-
-| # | Rule | Rationale |
-|---|------|-----------|
-| 1 | **All pages extend `BasePage`** | Consistency, shared utilities (`waitForPageLoad`, `getTitle`, `attachScreenshot`) |
-| 2 | **Single responsibility** | One page object = one application page. One panel = one reusable UI section. No DOM logic in test files. |
-| 3 | **Fixtures for dependency injection** | All page objects injected via `page.config.ts` fixtures. Tests never call `new PageObject()` directly (except with `authenticatedPage`). |
-| 4 | **Configuration from `.env` only** | No hardcoded URLs, credentials, or fallback defaults in code. Use `process.env.VAR!` with non-null assertion. |
-| 5 | **Page loader as single import source** | All page/panel imports go through `page-loader.ts`. No direct path imports in tests or fixtures. |
-| 6 | **Tests in `features/` only** | Test directory is `./features`. Never `tests/`, `specs/`, or `__tests__/`. |
+**Folder names are fixed.** **File names** are PascalCase for classes (`LoginPage.ts`), kebab-case for non-class config files (`page-loader.ts`), lowercase for data folders (`login/`).
 
 ---
 
-## 2. NPM Scripts Reference
+## 4. Root config files <a id="sec-config"></a>
 
-| Script | Command | Purpose |
-|--------|---------|---------|
-| `npm run ui:headed` | `playwright test --headed --project=chromium --workers=1 --trace on` | Run with visible browser, single worker, full tracing |
-| `npm run ui:headless` | `playwright test --project=chromium` | Headless execution (CI-friendly) |
-| `npm run ui:debug` | `playwright test --debug` | Open Playwright Inspector for step-through debugging |
-| `npm run clean` | _(node script)_ | Remove `test-results/`, `playwright-report/`, and `admin.json` |
-| `npm run audit` | `tsc --noEmit` | TypeScript type-checking only (no output files) |
+### 4.1 `tsconfig.json`
 
----
-
-## 3. Path Aliases (tsconfig.json)
-
-All path aliases available in the project:
-
-| Alias | Maps To | Usage |
-|-------|---------|-------|
-| `@pages/*` | `src/gui/pages/*` | Page object imports within `src/` |
-| `@panels/*` | `src/gui/panels/*` | Panel/component imports within `src/` |
-| `@gui/*` | `src/gui/*` | Any GUI layer import |
-| `@config/*` | `src/config/*` | Config, fixtures, utilities |
-| `@src/*` | `src/*` | Top-level src imports |
-| `@data/*` | `src/config/data/*` | Test data interfaces & loaders |
-
-### Import Rules
-
-**Inside `src/` files** — use path aliases:
-```typescript
-// Page objects importing from other layers
-import { LoginCredentials } from '@data/interfaces';
-import { step } from '@config/utils/decorators';
-import { HeaderPanel } from '@gui/panels/HeaderPanel';
-```
-
-**Inside `features/*.spec.ts` files** — two imports only:
-```typescript
-// 1. Native Playwright — test, expect from page.config (custom fixtures)
-import { test } from '../src/config/page.config';
-
-// 2. Everything else — from page-loader (single source)
-import { CredentialResolver, DataLoader, LoginExpectedFile, logSuite, logTest } from '../src/config/page-loader';
-```
-
-**Rule: Tests have exactly two import sources:**
-- `../src/config/page.config` — Playwright's `test` and `expect` (custom fixture extensions)
-- `../src/config/page-loader` — all page objects, panels, data loaders, interfaces, and logging utilities
-
-**Never import directly from:**
-- `../src/config/data/loaders` ❌
-- `../src/config/data/interfaces` ❌
-- `../src/config/utils/decorators` ❌
-- `../src/gui/pages/[PageName]` ❌
-
-**Why:** `page-loader.ts` is the single registry. All non-Playwright imports funnel through it, keeping test files clean and consistent.
-
----
-
-## 4. Page Object Design
-
-### 4.1 BasePage (Immutable Base Class)
-
-**File:** `src/gui/pages/BasePage.ts` — **Do not modify** unless adding generic cross-page utilities.
-
-```typescript
-import { Page, Locator, TestInfo } from '@playwright/test';
-
-export class BasePage {
-  protected page: Page;
-
-  constructor(page: Page) {
-    this.page = page;
-  }
-
-  async waitForPageLoad(): Promise<this> {
-    await this.page.waitForLoadState('domcontentloaded');
-    return this;
-  }
-
-  async waitForElement(locator: Locator, timeout = 10000): Promise<this> {
-    await locator.waitFor({ state: 'visible', timeout });
-    return this;
-  }
-
-  async getTitle(): Promise<string> {
-    return this.page.title();
-  }
-
-  async attachScreenshot(testInfo: TestInfo, name = 'screenshot'): Promise<void> {
-    const screenshot = await this.page.screenshot({ fullPage: true });
-    await testInfo.attach(name, { body: screenshot, contentType: 'image/png' });
-  }
-}
-```
-
-### 4.2 Page Object Template
-
-Every new page object must follow this exact structure:
-
-```typescript
-import { Page, expect } from '@playwright/test';
-import { BasePage } from './BasePage';
-import { step } from '@config/utils/decorators';
-
-export class [PageName] extends BasePage {
-  // ── Page Path ────────────────────────────────────────
-  readonly path = '/path/to/page';
-
-  // ── Locators (always private) ────────────────────────
-  private someInput    = this.page.locator('input[name="field"]');
-  private submitButton = this.page.locator('button[type="submit"]');
-  private errorMessage = this.page.locator('.error-selector');
-
-  // ── Constructor ──────────────────────────────────────
-  constructor(page: Page) {
-    super(page);
-  }
-
-  // ── Actions (step_* prefix) ──────────────────────────
-  @step
-  async step_navigate(): Promise<this> {
-    await this.page.goto(this.path);
-    await this.waitForPageLoad();
-    return this;
-  }
-
-  @step
-  async step_fillAndSubmit(data: SomeType): Promise<this> {
-    await this.someInput.fill(data.value);
-    await this.submitButton.click();
-    await this.waitForPageLoad();
-    return this;
-  }
-
-  // ── Verifications (verify_* prefix) ──────────────────
-  @step
-  async verify_onPage(): Promise<this> {
-    await expect(this.page).toHaveURL(/expected-path/);
-    return this;
-  }
-
-  @step
-  async verify_errorMessage(expectedText: string): Promise<this> {
-    await this.errorMessage.waitFor({ state: 'visible' });
-    const actual = await this.errorMessage.innerText();
-    expect(actual.trim()).toContain(expectedText);
-    return this;
-  }
-}
-```
-
-### 4.3 Naming Conventions
-
-| Element | Convention | Examples |
-|---------|-----------|----------|
-| Action methods | `step_*` prefix | `step_login()`, `step_navigate()`, `step_fillForm()` |
-| Verification methods | `verify_*` prefix | `verify_onDashboard()`, `verify_errorMessage()` |
-| Page URL | `readonly path` | `readonly path = '/web/index.php/auth/login'` |
-| DOM selectors | `private` class properties | `private usernameInput = this.page.locator(...)` |
-| Return type | Always `Promise<this>` | Enables method chaining (except `getTitle()` etc.) |
-| Decorator | `@step` on every public method | Automatic console logging of step execution |
-
-### 4.4 Real Example — LoginPage.ts
-
-```typescript
-import { Page, expect } from '@playwright/test';
-import { BasePage } from './BasePage';
-import { LoginCredentials } from '@data/interfaces';
-import { logField, logSep, step } from '@config/utils/decorators';
-
-export class LoginPage extends BasePage {
-  readonly path = '/web/index.php/auth/login';
-
-  private usernameInput = this.page.locator('input[name="username"]');
-  private passwordInput = this.page.locator('input[name="password"]');
-  private loginButton   = this.page.locator('button[type="submit"]');
-  private errorMessage  = this.page.locator('.oxd-alert-content-text');
-
-  constructor(page: Page) {
-    super(page);
-  }
-
-  @step
-  async step_navigate(): Promise<this> {
-    await this.page.goto(this.path);
-    await this.waitForPageLoad();
-    return this;
-  }
-
-  @step
-  async step_login(credentials: LoginCredentials): Promise<this> {
-    await this.usernameInput.fill(credentials.username);
-    await this.passwordInput.fill(credentials.password);
-    await this.loginButton.click();
-    await this.waitForPageLoad();
-    return this;
-  }
-
-  @step
-  async verify_errorMessage(expectedText: string): Promise<this> {
-    await this.errorMessage.waitFor({ state: 'visible' });
-    const actual = await this.errorMessage.innerText();
-    expect(actual.trim()).toContain(expectedText);
-    return this;
-  }
-}
-```
-
----
-
-## 5. Panel (Component) Pattern
-
-### 5.1 When to Create a Panel
-
-Create a panel when a UI section:
-- Appears on **multiple pages** (header, sidebar, footer)
-- Has **complex internal interactions** (dropdowns, menus)
-- Should be **independently reusable**
-
-### 5.2 Panel Template
-
-```typescript
-import { Page, Locator } from '@playwright/test';
-import { step } from '@config/utils/decorators';
-
-export class [PanelName] {
-  private someElement: Locator;
-
-  constructor(private page: Page) {
-    this.someElement = page.locator('.selector');
-  }
-
-  @step
-  async getSomeValue(): Promise<string> {
-    await this.someElement.waitFor({ state: 'visible' });
-    return (await this.someElement.innerText()).trim();
-  }
-
-  @step
-  async clickSomething(): Promise<this> {
-    await this.someElement.click();
-    return this;
-  }
-}
-```
-
-**Key differences from Page Objects:**
-- Panels do **not** extend `BasePage`
-- Panels use `constructor(private page: Page)` shorthand
-- Locators are initialized in the constructor body (not as class properties)
-- Panels are composed into page objects, not used directly in tests
-
-### 5.3 Composing Panels into Pages
-
-```typescript
-export class DashboardPage extends BasePage {
-  readonly topNav: HeaderPanel;  // Panel as a readonly property
-
-  constructor(page: Page) {
-    super(page);
-    this.topNav = new HeaderPanel(page);  // Instantiate in constructor
-  }
-
-  @step
-  async verify_profileName(): Promise<this> {
-    const name = await this.topNav.getProfileName();  // Delegate to panel
-    expect(name.length).toBeGreaterThan(0);
-    return this;
-  }
-}
-```
-
----
-
-## 6. Test Structure & Conventions
-
-### 6.1 Test File Template — Standard Fixtures
-
-Use this pattern when testing flows that start from a known page (login, forms, etc.):
-
-```typescript
-import { test, expect } from '../src/config/page.config';
-import { CredentialResolver } from '../src/config/data/loaders';
-import { DataLoader } from '../src/config/data/loaders';
-import { LoginExpectedFile } from '../src/config/data/interfaces';
-import { logSuite, logTest } from '../src/config/utils/decorators';
-
-// Load expected values from JSON (tester-editable)
-const expected = DataLoader.load<LoginExpectedFile>('login/expected');
-
-// Clear auth state when explicitly testing login flow
-test.use({ storageState: { cookies: [], origins: [] } });
-
-test.describe('Feature Name - Scenario Group', () => {
-  logSuite('Feature Name - Scenario Group');
-
-  test('should do something when condition', async ({ loginPage, dashboardPage }) => {
-    logTest('should do something when condition');
-
-    // Arrange
-    await loginPage.step_navigate();
-
-    // Act
-    await loginPage.step_login(CredentialResolver.getUser('admin'));
-
-    // Assert
-    await dashboardPage.verify_onDashboard();
-    await dashboardPage.verify_profileName();
-  });
-
-  test('should show error for invalid input', async ({ loginPage }) => {
-    logTest('should show error for invalid input');
-    await loginPage.step_navigate();
-    await loginPage.step_login(CredentialResolver.getUser('invalid'));
-    await loginPage.verify_errorMessage(expected.errors.invalidCredentials);
-  });
-});
-```
-
-### 6.2 Test File Template — Authenticated Session
-
-Use this pattern when testing pages that require a logged-in user (skip login flow):
-
-```typescript
-import { test, expect } from '../src/config/page.config';
-import { DataLoader } from '../src/config/data/loaders';
-import { DashboardExpectedFile } from '../src/config/data/interfaces';
-import { logSuite, logTest } from '../src/config/utils/decorators';
-import { DashboardPage } from '../src/gui/pages/DashboardPage';
-
-// Load expected values from JSON (tester-editable)
-const expected = DataLoader.load<DashboardExpectedFile>('dashboard/expected');
-
-test.describe('Feature Name - Authenticated', () => {
-  logSuite('Feature Name - Authenticated');
-
-  test('should display page after authenticated session', async ({ authenticatedPage }) => {
-    logTest('should display page after authenticated session');
-    const dashboard = new DashboardPage(authenticatedPage);
-    await dashboard.step_navigate();
-    await dashboard.verify_onDashboard();
-    await dashboard.verify_pageTitle(expected.labels.pageTitle);
-    await dashboard.verify_profileName();
-  });
-});
-```
-
-**When to use which pattern:**
-
-| Pattern | When | Auth State |
-|---------|------|------------|
-| Standard fixtures (`loginPage`, `dashboardPage`) | Testing login flow or starting from login | `test.use({ storageState: { cookies: [], origins: [] } })` clears auth |
-| `authenticatedPage` fixture | Testing pages behind login (skip login step) | Restores session from `admin.json` |
-
-**Note:** When using `authenticatedPage`, you instantiate page objects manually with the authenticated page instance since it uses a separate browser context.
-
-### 6.3 Test Naming Convention
-
-```
-should [expected behavior] when/for [condition/context]
-```
-
-Examples:
-- `should login successfully and verify profile name on home page`
-- `should show error message for invalid credentials`
-- `should display dashboard home page with profile visible after authenticated session`
-
-### 6.4 Test Rules
-
-**Rule 1: Import `test` and `expect` from `page.config.ts`**
-```typescript
-// CORRECT — custom fixtures available
-import { test, expect } from '../src/config/page.config';
-
-// WRONG — no custom fixtures
-import { test, expect } from '@playwright/test';
-```
-
-**Rule 2: Use fixtures, never instantiate pages directly (except with authenticatedPage)**
-```typescript
-// CORRECT — fixture injection
-test('scenario', async ({ loginPage }) => {
-  await loginPage.step_navigate();
-});
-
-// WRONG — direct instantiation
-test('scenario', async ({ page }) => {
-  const loginPage = new LoginPage(page);
-});
-```
-
-**Rule 3: Keep tests business-focused — no DOM logic**
-```typescript
-// CORRECT — high-level, readable
-await loginPage.step_login(CredentialResolver.getUser('admin'));
-
-// WRONG — DOM selectors in test
-await page.fill('input[name="username"]', 'Admin');
-await page.click('button[type="submit"]');
-```
-
-**Rule 4: Use test data constants, never hardcoded values**
-```typescript
-// CORRECT
-await loginPage.step_login(CredentialResolver.getUser('admin'));
-
-// WRONG
-await loginPage.step_login({ username: 'Admin', password: 'admin123' });
-```
-
-**Rule 5: Always include logging calls**
-```typescript
-test.describe('Suite Name', () => {
-  logSuite('Suite Name');           // First line of describe block
-
-  test('test name', async ({ ... }) => {
-    logTest('test name');           // First line of test body
-    // ... test steps
-  });
-});
-```
-
-**Rule 6: Use sequential `await` statements (not chaining)**
-```typescript
-// CORRECT — clear, debuggable
-await loginPage.step_navigate();
-await loginPage.step_login(CredentialResolver.getUser('admin'));
-await dashboardPage.verify_onDashboard();
-
-// AVOID — harder to debug, unclear stack traces
-await (await (await loginPage.step_navigate()).step_login(CredentialResolver.getUser('admin')));
-```
-
----
-
-## 7. Fixture Management
-
-### 7.1 Fixture Architecture
-
-**File:** `src/config/page.config.ts`
-
-```typescript
-import { test as base, expect, Browser, Page } from '@playwright/test';
-import * as dotenv from 'dotenv';
-import * as path from 'path';
-import * as fs from 'fs';
-import { LoginPage, DashboardPage } from '@config/page-loader';
-
-dotenv.config({ path: path.resolve(__dirname, '../../.env') });
-
-const AUTH_FILE = path.resolve(__dirname, 'utils/admin.json');
-
-type MyFixtures = {
-  loginPage: LoginPage;
-  dashboardPage: DashboardPage;
-  authenticatedPage: Page;
-};
-
-const test = base.extend<MyFixtures>({
-  loginPage: async ({ page }, use) => {
-    await use(new LoginPage(page));
-  },
-
-  dashboardPage: async ({ page }, use) => {
-    await use(new DashboardPage(page));
-  },
-
-  authenticatedPage: async ({ browser }, use) => {
-    const storageState = fs.existsSync(AUTH_FILE) ? AUTH_FILE : undefined;
-    const context = await browser.newContext({ storageState });
-    const page = await context.newPage();
-    await use(page);
-    await context.close();
-  },
-});
-
-export { test, expect };
-```
-
-### 7.2 Adding a New Fixture
-
-When creating a new page object, register it as a fixture:
-
-**Step 1:** Add to the `MyFixtures` type:
-```typescript
-type MyFixtures = {
-  loginPage: LoginPage;
-  dashboardPage: DashboardPage;
-  authenticatedPage: Page;
-  newPage: NewPage;             // Add here
-};
-```
-
-**Step 2:** Add the fixture implementation:
-```typescript
-newPage: async ({ page }, use) => {
-  await use(new NewPage(page));
-},
-```
-
-**Step 3:** Import the page from page-loader:
-```typescript
-import { LoginPage, DashboardPage, NewPage } from '@config/page-loader';
-```
-
----
-
-## 8. Page Loader (Barrel Exports)
-
-### 8.1 Current Registry
-
-**File:** `src/config/page-loader.ts`
-
-```typescript
-export { LoginPage } from '../gui/pages/LoginPage';
-export { DashboardPage } from '../gui/pages/DashboardPage';
-export { HeaderPanel } from '../gui/panels/HeaderPanel';
-```
-
-### 8.2 Current Registry
-
-```typescript
-// ── Page Objects ─────────────────────────────────────────────
-export { LoginPage } from '../gui/pages/LoginPage';
-export { DashboardPage } from '../gui/pages/DashboardPage';
-
-// ── Panels ───────────────────────────────────────────────────
-export { HeaderPanel } from '../gui/panels/HeaderPanel';
-
-// ── Data Loaders ─────────────────────────────────────────────
-export { DataLoader } from './data/loaders/DataLoader';
-export { CredentialResolver } from './data/loaders/CredentialResolver';
-
-// ── Data Interfaces ──────────────────────────────────────────
-export * from './data/interfaces';
-
-// ── Logging & Decorators ─────────────────────────────────────
-export { logSuite, logTest, logField, logUrl, logSep, logSuccess, step } from './utils/decorators';
-```
-
-### 8.3 Rules
-
-- **Every new page object must be exported here**
-- **Every new panel must be exported here**
-- **Every new data interface must be exported here** (via `export * from './data/interfaces'`)
-- **Tests import ONLY from `page-loader` (and native `page.config` for `test`)**
-- Fixture file (`page.config.ts`) imports pages/panels from `page-loader.ts`
-
----
-
-## 9. Test Data Management (JSON-Based Model)
-
-### 9.1 Architecture Overview
-
-Test data follows a **three-layer architecture** designed so testers edit JSON while developers maintain type safety:
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│  Layer 1: JSON Data Files (tester-editable, no TS needed)   │
-│  src/data/login/users.json                             │
-│  src/data/login/expected.json                          │
-│  src/data/dashboard/expected.json                      │
-├─────────────────────────────────────────────────────────────┤
-│  Layer 2: Loaders (read JSON, apply overrides, cache)       │
-│  src/config/data/loaders/DataLoader.ts                             │
-│  src/config/data/loaders/CredentialResolver.ts                     │
-├─────────────────────────────────────────────────────────────┤
-│  Layer 3: Interfaces (TypeScript type definitions)          │
-│  src/config/data/interfaces/login.interfaces.ts                    │
-│  src/config/data/interfaces/dashboard.interfaces.ts                │
-└─────────────────────────────────────────────────────────────┘
-```
-
-**SOLID principles applied:**
-- **S** — `DataLoader` reads JSON. `CredentialResolver` resolves credentials. Each has one job.
-- **O** — New feature = new JSON file + interface. No existing code changes.
-- **L** — Any `LoginCredentials` works regardless of source (JSON, .env override).
-- **I** — Per-feature interfaces, no god-object.
-- **D** — Page objects depend on interfaces, not on loaders or JSON files.
-
-### 9.2 JSON Data Files (Tester-Editable)
-
-**`src/data/login/users.json`** — test user credentials:
 ```json
 {
-  "_comment": "Test user credentials. Admin can be overridden by .env.",
-  "users": {
-    "admin": {
-      "username": "Admin",
-      "password": "admin123"
-    },
-    "invalid": {
-      "username": "invalid_user",
-      "password": "wrong_password"
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "types": ["node", "@playwright/test"],
+    "ignoreDeprecations": "5.0",
+    "baseUrl": ".",
+    "paths": {
+      "@pages/*":  ["src/gui/pages/*"],
+      "@panels/*": ["src/gui/panels/*"],
+      "@config/*": ["src/config/*"],
+      "@gui/*":    ["src/gui/*"],
+      "@src/*":    ["src/*"]
     }
-  }
-}
-```
-
-**`src/data/login/expected.json`** — expected UI text:
-```json
-{
-  "_comment": "Expected UI text for login feature verification.",
-  "errors": {
-    "invalidCredentials": "Invalid credentials",
-    "requiredField": "Required",
-    "accountDisabled": "Account disabled"
   },
-  "labels": {
-    "pageTitle": "OrangeHRM",
-    "loginButtonText": "Login"
-  }
+  "include": ["src/**/*", "features/**/*", "playwright.config.ts"],
+  "exclude": ["node_modules"]
 }
 ```
 
-**`src/data/dashboard/expected.json`** — expected dashboard text:
-```json
-{
-  "_comment": "Expected UI text for dashboard verification.",
-  "labels": {
-    "pageTitle": "OrangeHRM",
-    "headerTitle": "Dashboard"
-  }
-}
-```
+`resolveJsonModule` is required. **Do not** add `experimentalDecorators`, `emitDecoratorMetadata`, or a `@data/*` alias.
 
-### 9.3 Data Loaders
+### 4.2 `playwright.config.ts`
 
-**`DataLoader`** — generic JSON reader:
-```typescript
-import { DataLoader } from '../src/config/data/loaders';
-import { LoginExpectedFile } from '../src/config/data/interfaces';
-
-// Load by feature path (resolves to src/data/login/expected.json)
-const expected = DataLoader.load<LoginExpectedFile>('login/expected');
-console.log(expected.errors.invalidCredentials); // "Invalid credentials"
-```
-
-**`CredentialResolver`** — user credentials with .env override:
-```typescript
-import { CredentialResolver } from '../src/config/data/loaders';
-
-// Get a specific user
-const admin = CredentialResolver.getUser('admin');
-
-// Get all users (for data-driven tests)
-const allUsers = CredentialResolver.getAllUsers();
-```
-
-**Credential resolution strategy:**
-```
-CredentialResolver.getUser('admin')
-  ├─ Load src/data/login/users.json
-  ├─ If .env has ADMIN_USERNAME + ADMIN_PASSWORD → override 'admin' entry
-  └─ Return LoginCredentials object
-```
-
-### 9.4 Tester Workflow
-
-**To add a new test user** (no TypeScript needed):
-1. Open `src/data/login/users.json`
-2. Add: `"newUser": { "username": "...", "password": "..." }`
-3. Done. Tests use `CredentialResolver.getUser('newUser')`
-
-**To update expected error messages:**
-1. Open `src/data/login/expected.json`
-2. Edit the value under `errors.invalidCredentials`
-3. Done. All tests referencing this value update automatically.
-
-**To add test data for a new feature:**
-1. Create JSON file: `src/data/[feature]/[datatype].json`
-2. Create interface: `src/config/data/interfaces/[feature].interfaces.ts`
-3. Export from `src/config/data/interfaces/index.ts`
-4. Load in tests: `DataLoader.load<NewInterface>('[feature]/[datatype]')`
-
-### 9.5 Adding New Feature Test Data (Developer Workflow)
-
-**Step 1:** Create the JSON file — `src/data/employee/data.json`:
-```json
-{
-  "_comment": "Employee test data for PIM module.",
-  "employees": {
-    "valid": { "firstName": "John", "lastName": "Doe", "employeeId": "EMP001" },
-    "minimal": { "firstName": "Jane", "lastName": "Smith", "employeeId": "" }
-  }
-}
-```
-
-**Step 2:** Create the interface — `src/config/data/interfaces/employee.interfaces.ts`:
-```typescript
-export interface EmployeeData {
-  firstName: string;
-  lastName: string;
-  employeeId: string;
-}
-
-export interface EmployeeDataFile {
-  employees: Record<string, EmployeeData>;
-}
-```
-
-**Step 3:** Export from barrel — `src/config/data/interfaces/index.ts`:
-```typescript
-export * from './employee.interfaces';
-```
-
-**Step 4:** Use in page objects:
-```typescript
-import { EmployeeData } from '@data/interfaces';
-
-@step
-async step_createEmployee(data: EmployeeData): Promise<this> {
-  await this.firstNameInput.fill(data.firstName);
-  return this;
-}
-```
-
-**Step 5:** Use in tests:
-```typescript
-import { DataLoader } from '../src/config/data/loaders';
-import { EmployeeDataFile } from '../src/config/data/interfaces';
-
-const empData = DataLoader.load<EmployeeDataFile>('employee/data');
-
-test('should create employee', async ({ employeePage }) => {
-  await employeePage.step_createEmployee(empData.employees.valid);
-});
-```
-
-### 9.6 Data-Driven Parameterized Tests
-
-```typescript
-import { CredentialResolver } from '../src/config/data/loaders';
-import { DataLoader } from '../src/config/data/loaders';
-import { LoginExpectedFile } from '../src/config/data/interfaces';
-
-const expected = DataLoader.load<LoginExpectedFile>('login/expected');
-
-// Test every non-admin user gets an error — add users to JSON to add test cases
-const negativeUsers = Object.entries(CredentialResolver.getAllUsers())
-  .filter(([key]) => key !== 'admin');
-
-for (const [userKey, credentials] of negativeUsers) {
-  test(`should show error for user: ${userKey}`, async ({ loginPage }) => {
-    await loginPage.step_navigate();
-    await loginPage.step_login(credentials);
-    await loginPage.verify_errorMessage(expected.errors.invalidCredentials);
-  });
-}
-```
-
-### 9.7 Rules
-
-- All test data lives in `src/data/` as JSON files — never hardcode in tests or page objects
-- All TypeScript interfaces live in `src/config/data/interfaces/`
-- Use `DataLoader.load<T>()` to read JSON — never `import` JSON directly
-- Use `CredentialResolver.getUser()` for credentials — never read `.env` directly in tests
-- Use descriptive key names in JSON (`admin`, `invalid`, `locked`, `withSpecialChars`)
-- Use `_comment` field in JSON for documentation (JSON has no native comments)
-
----
-
-## 10. Global Setup & Authentication
-
-### 10.1 How It Works
-
-**File:** `src/config/utils/global-setup.ts`
-
-Runs **once** before the entire test suite:
-1. Launches a Chromium browser
-2. Navigates to the login page
-3. Authenticates with admin credentials via `CredentialResolver.getUser('admin')`
-4. Saves cookies + localStorage to `src/config/utils/admin.json`
-5. Closes the browser
-
-The `authenticatedPage` fixture then reads `admin.json` to create pre-authenticated browser contexts.
-
-**Credential flow:** `CredentialResolver` loads from `json/login/users.json`, then overrides `admin` with `.env` values if present (CI/CD support).
-
-### 10.2 Adapting for a New Application
-
-Update three things in `global-setup.ts`:
-
-```typescript
-// 1. Login URL
-await page.goto(`${process.env.BASE_URL}/new/login/path`, {
-  waitUntil: 'networkidle',
-});
-
-// 2. Login form selectors
-await page.locator('new-username-selector').fill(ADMIN_USERNAME);
-await page.locator('new-password-selector').fill(ADMIN_PASSWORD);
-await page.click('new-submit-selector');
-
-// 3. Success indicator (optional — adjust if needed)
-// Current: relies on no error thrown after click
-```
-
----
-
-## 11. Decorator & Logging System
-
-### 11.1 @step Decorator
-
-**File:** `src/config/utils/decorators.ts`
-
-Applied to every public method in page objects and panels. Automatically logs method names on execution:
-
-```
-  ✔  step_navigate
-  ✔  step_login
-  ✔  verify_onDashboard
-```
-
-**Usage:**
-```typescript
-@step
-async step_login(credentials: LoginCredentials): Promise<this> {
-  // Method body — logging happens automatically
-  return this;
-}
-```
-
-Supports both legacy `experimentalDecorators` and new TC39 decorator syntax.
-
-### 11.2 Logging Functions
-
-| Function | Output | Where to Use |
-|----------|--------|-------------|
-| `logSuite(name)` | `@suite -> Name` | First line of `test.describe()` |
-| `logTest(name)` | `  @test -> Name` | First line of each `test()` |
-| `logField(label, value)` | `  Label                : value` | Page objects for debugging |
-| `logUrl(label, url)` | `  Label                → url` | Page objects for debugging |
-| `logSep()` | `━━━━━━━━━━━━━━━...` | Visual separator |
-| `logSuccess(msg)` | `  ✔  msg` | Used internally by `@step` |
-
----
-
-## 12. Playwright Configuration
-
-### 12.1 Full Configuration
-
-**File:** `playwright.config.ts`
-
-```typescript
+```ts
 import { defineConfig, devices } from '@playwright/test';
 import * as dotenv from 'dotenv';
 
@@ -945,14 +263,12 @@ export default defineConfig({
   fullyParallel: false,
   retries: process.env.CI ? 2 : 1,
   workers: process.env.CI ? 1 : undefined,
-
-  globalSetup: './src/config/utils/global-setup',
   outputDir: './test-results/runs',
   preserveOutput: 'failures-only',
 
   reporter: [
-    ['html', { outputFolder: 'test-results/html-report', open: 'never' }],
-    ['json', { outputFile: 'test-results/results.json' }],
+    ['html',  { outputFolder: 'test-results/html-report', open: 'never' }],
+    ['json',  { outputFile: 'test-results/results.json' }],
     ['junit', { outputFile: 'test-results/results.xml' }],
     ['list'],
   ],
@@ -967,578 +283,489 @@ export default defineConfig({
   },
 
   projects: [
-    {
-      name: 'chromium',
-      use: {
-        ...devices['Desktop Chrome'],
-        launchOptions: {
-          args: ['--no-sandbox'],
-        },
-      },
-    },
+    { name: 'chromium', use: { ...devices['Desktop Chrome'], launchOptions: { args: ['--no-sandbox'] } } },
   ],
 });
 ```
 
-### 12.2 Key Settings
-
-| Setting | Value | Purpose |
-|---------|-------|---------|
-| `testDir` | `./features` | All tests live here |
-| `fullyParallel` | `false` | Tests run sequentially |
-| `retries` | 2 in CI, 1 local | Flaky detection locally; more retries in CI |
-| `workers` | 1 in CI, unlimited local | Single worker in CI |
-| `trace` | `on` | Trace captured for every test (embedded in HTML report) |
-| `screenshot` | `only-on-failure` | Auto-screenshot on failure |
-| `video` | `retain-on-failure` | Video recording kept on failure |
-| `actionTimeout` | 15000ms | Max wait for clicks/fills |
-| `navigationTimeout` | 30000ms | Max wait for page navigation |
-| `globalSetup` | `./src/config/utils/global-setup` | Pre-test authentication |
-
-### 12.3 Output Artifacts (Every Run)
-
-| Artifact | Location | Purpose |
-|----------|----------|---------|
-| HTML report + traces | `test-results/html-report/index.html` | Visual report with embedded trace viewer & network logs per test |
-| JSON report | `test-results/results.json` | Machine-readable results |
-| JUnit XML | `test-results/results.xml` | CI/CD integration |
-| Screenshots | `test-results/runs/[test]/` | Failure evidence (failures only) |
-| Video | `test-results/runs/[test]/` | Failure recording (failures only) |
-
-> **Note:** Network logs are captured inside the trace viewer. Open `html-report/index.html`, click any test, then open the **Network** tab in the trace panel.
+**Do not** set `globalSetup`. **Do not** set project-level `storageState`. Auth happens inline inside tests that need it.
 
 ---
 
-## 13. Environment Configuration
+## 5. Framework files <a id="sec-framework"></a>
 
-### 13.1 .env File
+### 5.1 `src/config/page-loader.ts` (barrel)
 
-```bash
-# Application Base URL
-BASE_URL=https://opensource-demo.orangehrmlive.com
+Single-line re-exports only. When new pages, panels, or JSON data are added, append a line.
 
-# Admin Credentials
-ADMIN_USERNAME=Admin
-ADMIN_PASSWORD=admin123
+```ts
+// ── Page Objects ─────────────────────────────────────────────
+export { LoginPage }     from '../gui/pages/LoginPage';
+export { DashboardPage } from '../gui/pages/DashboardPage';
+
+// ── Panels ───────────────────────────────────────────────────
+export { HeaderPanel } from '../gui/panels/HeaderPanel';
+
+// ── Test Data ────────────────────────────────────────────────
+export { default as users }             from '../data/login/users.json';
+export { default as loginExpected }     from '../data/login/expected.json';
+export { default as dashboardExpected } from '../data/dashboard/expected.json';
 ```
 
-### 13.2 Rules
+On a fresh project, comment out the example lines until those files exist, or start with an empty barrel and append as features are added.
 
-- `.env` **is tracked in git** (unlike typical projects) for quick project setup
-- No hardcoded fallback defaults: use `process.env.VAR!` (non-null assertion)
-- `dotenv` is loaded in three places:
-  - `playwright.config.ts` — `dotenv.config()`
-  - `page.config.ts` — `dotenv.config({ path: ... })`
-  - `global-setup.ts` — `dotenv.config({ path: ... })`
+### 5.2 `src/config/page.config.ts` (fixtures)
+
+One fixture per page object. Fixtures only wrap `new <PageObject>(page)` — no auth, no setup logic.
+
+```ts
+import { test as base, expect } from '@playwright/test';
+import * as dotenv from 'dotenv';
+import * as path from 'path';
+import { LoginPage, DashboardPage } from '@config/page-loader';
+
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
+
+type MyFixtures = {
+  loginPage: LoginPage;
+  dashboardPage: DashboardPage;
+};
+
+const test = base.extend<MyFixtures>({
+  loginPage:     async ({ page }, use) => { await use(new LoginPage(page)); },
+  dashboardPage: async ({ page }, use) => { await use(new DashboardPage(page)); },
+});
+
+export { test, expect };
+```
+
+### 5.3 `src/gui/pages/BasePage.ts`
+
+```ts
+import { Page, Locator, TestInfo } from '@playwright/test';
+
+export class BasePage {
+  protected page: Page;
+
+  constructor(page: Page) { this.page = page; }
+
+  async waitForPageLoad(): Promise<this> {
+    await this.page.waitForLoadState('domcontentloaded');
+    return this;
+  }
+
+  async waitForElement(locator: Locator, timeout = 10000): Promise<this> {
+    await locator.waitFor({ state: 'visible', timeout });
+    return this;
+  }
+
+  async getTitle(): Promise<string> { return this.page.title(); }
+
+  async attachScreenshot(testInfo: TestInfo, name = 'screenshot'): Promise<void> {
+    const screenshot = await this.page.screenshot({ fullPage: true });
+    await testInfo.attach(name, { body: screenshot, contentType: 'image/png' });
+  }
+}
+```
 
 ---
 
-## 14. Step-by-Step: Creating a New Test
+## 6. Page object template <a id="sec-page-object"></a>
 
-Follow this walkthrough when adding a test for a new feature.
+> **Example, substitute names and selectors.** The structure (locators block → `step_*` block → `verify_*` block, all returning `this`) is normative.
 
-### Scenario: Add tests for an "Employee List" page
-
-**Step 1: Create the Page Object** — `src/gui/pages/EmployeeListPage.ts`
-
-```typescript
+```ts
 import { Page, expect } from '@playwright/test';
 import { BasePage } from './BasePage';
-import { step } from '@config/utils/decorators';
+// import composed panels via @panels alias when needed
 
-export class EmployeeListPage extends BasePage {
-  readonly path = '/web/index.php/pim/viewEmployeeList';
+export type LoginCredentials = { username: string; password: string };  // colocate small data shapes here
 
-  private searchInput   = this.page.locator('input[placeholder="Type for hints..."]');
-  private searchButton  = this.page.locator('button[type="submit"]');
-  private employeeTable = this.page.locator('.oxd-table-body');
-  private noRecordsText = this.page.locator('.oxd-toast-content');
+export class LoginPage extends BasePage {
+  readonly path = '/web/index.php/auth/login';
 
-  constructor(page: Page) {
-    super(page);
-  }
+  // 1. Locators — private fields, declared at class scope
+  private usernameInput = this.page.locator('input[name="username"]');
+  private passwordInput = this.page.locator('input[name="password"]');
+  private loginButton   = this.page.locator('button[type="submit"]');
+  private errorMessage  = this.page.locator('.oxd-alert-content-text');
 
-  @step
+  constructor(page: Page) { super(page); }
+
+  // 2. step_* methods — actions
   async step_navigate(): Promise<this> {
     await this.page.goto(this.path);
     await this.waitForPageLoad();
     return this;
   }
 
-  @step
-  async step_searchEmployee(name: string): Promise<this> {
-    await this.searchInput.fill(name);
-    await this.searchButton.click();
+  async step_login(credentials: LoginCredentials): Promise<this> {
+    await this.usernameInput.fill(credentials.username);
+    await this.passwordInput.fill(credentials.password);
+    await this.loginButton.click();
     await this.waitForPageLoad();
     return this;
   }
 
-  @step
-  async verify_onEmployeeList(): Promise<this> {
-    await expect(this.page).toHaveURL(/viewEmployeeList/);
-    return this;
-  }
-
-  @step
-  async verify_tableVisible(): Promise<this> {
-    await this.employeeTable.waitFor({ state: 'visible' });
+  // 3. verify_* methods — assertions
+  async verify_errorMessage(expectedText: string): Promise<this> {
+    await this.errorMessage.waitFor({ state: 'visible' });
+    expect((await this.errorMessage.innerText()).trim()).toContain(expectedText);
     return this;
   }
 }
 ```
 
-**Step 2: Export in Page Loader** — `src/config/page-loader.ts`
-
-```typescript
-export { LoginPage } from '../gui/pages/LoginPage';
-export { DashboardPage } from '../gui/pages/DashboardPage';
-export { EmployeeListPage } from '../gui/pages/EmployeeListPage';  // ADD
-
-export { HeaderPanel } from '../gui/panels/HeaderPanel';
-```
-
-**Step 3: Register Fixture** — `src/config/page.config.ts`
-
-Add to `MyFixtures` type:
-```typescript
-type MyFixtures = {
-  loginPage: LoginPage;
-  dashboardPage: DashboardPage;
-  employeeListPage: EmployeeListPage;  // ADD
-  authenticatedPage: Page;
-};
-```
-
-Add fixture implementation:
-```typescript
-employeeListPage: async ({ page }, use) => {
-  await use(new EmployeeListPage(page));
-},
-```
-
-Update import:
-```typescript
-import { LoginPage, DashboardPage, EmployeeListPage } from '@config/page-loader';
-```
-
-**Step 4: Add Test Data** (if needed) — `src/data/employee-list/search.json`
-
-```json
-{
-  "_comment": "Employee list search test data.",
-  "searches": {
-    "existing": "Paul",
-    "nonExistent": "zzzzNonExistent"
-  }
-}
-```
-
-**Step 5: Write the Test** — `features/employee-list.spec.ts`
-
-```typescript
-import { test, expect } from '../src/config/page.config';
-import { DataLoader } from '../src/config/data/loaders';
-import { logSuite, logTest } from '../src/config/utils/decorators';
-
-test.describe('OrangeHRM - Employee List', () => {
-  logSuite('OrangeHRM - Employee List');
-
-  test('should navigate to employee list page after authenticated session', async ({ authenticatedPage }) => {
-    logTest('should navigate to employee list page after authenticated session');
-    const employeeList = new (await import('../src/gui/pages/EmployeeListPage')).EmployeeListPage(authenticatedPage);
-    await employeeList.step_navigate();
-    await employeeList.verify_onEmployeeList();
-    await employeeList.verify_tableVisible();
-  });
-});
-```
-
-**Step 6: Verify**
-
-```bash
-npm run audit          # TypeScript compiles without errors
-npm run ui:headless    # All tests pass
-```
+**Allowed deviations:** locator selectors and `path` change per application. Class layout, inheritance, and `Promise<this>` return type do not.
 
 ---
 
-## 15. Step-by-Step: Creating a New Panel
+## 7. Panel template <a id="sec-panel"></a>
 
-### Scenario: Add a reusable Sidebar Navigation panel
+Panels are **composed**, not extended. They receive `page` and own a slice of locators. Hold an instance on a page object: `readonly topNav = new HeaderPanel(this.page);`.
 
-**Step 1: Create the Panel** — `src/gui/panels/SidebarPanel.ts`
-
-```typescript
+```ts
 import { Page, Locator } from '@playwright/test';
-import { step } from '@config/utils/decorators';
 
-export class SidebarPanel {
-  private menuItems: Locator;
-  private searchInput: Locator;
+export class HeaderPanel {
+  private profileBadge: Locator;
+  private profileName:  Locator;
 
   constructor(private page: Page) {
-    this.menuItems = page.locator('.oxd-main-menu-item');
-    this.searchInput = page.locator('.oxd-main-menu-search input');
+    this.profileBadge = page.locator('.oxd-userdropdown');
+    this.profileName  = page.locator('.oxd-userdropdown-name');
   }
 
-  @step
-  async clickMenuItem(name: string): Promise<this> {
-    await this.menuItems.filter({ hasText: name }).click();
+  async getProfileName(): Promise<string> {
+    await this.profileName.waitFor({ state: 'visible' });
+    return (await this.profileName.innerText()).trim();
+  }
+
+  async openProfileMenu(): Promise<this> {
+    await this.profileBadge.click();
     return this;
   }
-
-  @step
-  async searchMenu(text: string): Promise<this> {
-    await this.searchInput.fill(text);
-    return this;
-  }
-}
-```
-
-**Step 2: Export in Page Loader** — add to `src/config/page-loader.ts`:
-```typescript
-export { SidebarPanel } from '../gui/panels/SidebarPanel';
-```
-
-**Step 3: Compose into a Page Object** (if used on specific pages):
-```typescript
-export class DashboardPage extends BasePage {
-  readonly topNav: HeaderPanel;
-  readonly sidebar: SidebarPanel;  // ADD
-
-  constructor(page: Page) {
-    super(page);
-    this.topNav = new HeaderPanel(page);
-    this.sidebar = new SidebarPanel(page);  // ADD
-  }
 }
 ```
 
 ---
 
-## 16. Code Review Checklist
+## 8. JSON data templates <a id="sec-data"></a>
 
-Use this checklist when reviewing PRs that add or modify test code.
+The JSON file's top-level keys are the data the spec consumes — **no wrapper objects.** `_comment` is allowed and ignored at runtime.
 
-### Page Object Review
+### 8.1 Credentials — `users.json`
 
-| # | Check | Pass? |
-|---|-------|-------|
-| 1 | Extends `BasePage` |  |
-| 2 | Has `readonly path` property |  |
-| 3 | All locators are `private` |  |
-| 4 | Actions use `step_*` prefix |  |
-| 5 | Verifications use `verify_*` prefix |  |
-| 6 | All public methods have `@step` decorator |  |
-| 7 | All methods return `Promise<this>` (except utility getters) |  |
-| 8 | Constructor calls `super(page)` |  |
-| 9 | Imports use path aliases (`@config/*`, `@src/*`, `@gui/*`) |  |
-| 10 | No hardcoded test data — uses `@data/interfaces` types |  |
-| 11 | Exported in `page-loader.ts` |  |
-| 12 | Registered as fixture in `page.config.ts` |  |
-| 13 | `npm run audit` passes (TypeScript compiles) |  |
-
-### Panel Review
-
-| # | Check | Pass? |
-|---|-------|-------|
-| 1 | Does **not** extend `BasePage` |  |
-| 2 | Uses `constructor(private page: Page)` pattern |  |
-| 3 | Locators initialized in constructor body |  |
-| 4 | All public methods have `@step` decorator |  |
-| 5 | Exported in `page-loader.ts` |  |
-| 6 | Composed into relevant page objects (not used directly in tests) |  |
-
-### Test Review
-
-| # | Check | Pass? |
-|---|-------|-------|
-| 1 | Located in `features/` directory |  |
-| 2 | File named `[feature].spec.ts` |  |
-| 3 | Imports `test, expect` from `../src/config/page.config` |  |
-| 4 | Uses fixtures (not `new PageObject(page)`) for standard tests |  |
-| 5 | Uses `authenticatedPage` correctly for pre-auth tests |  |
-| 6 | Has `test.use({ storageState: ... })` if testing login flow |  |
-| 7 | Includes `logSuite()` at start of `test.describe()` |  |
-| 8 | Includes `logTest()` at start of each `test()` |  |
-| 9 | No DOM selectors or `page.locator()` calls in test body |  |
-| 10 | Test data from JSON via `DataLoader`/`CredentialResolver`, no hardcoded values |  |
-| 11 | Test names follow `should [behavior] when/for [condition]` |  |
-| 12 | Uses sequential `await` (not chained promises) |  |
-| 13 | `npm run ui:headless` passes |  |
-
----
-
-## 17. Anti-Patterns & Common Mistakes
-
-### Mistake 1: DOM Logic in Tests
-
-```typescript
-// WRONG — selectors belong in page objects
-test('should login', async ({ page }) => {
-  await page.fill('input[name="username"]', 'Admin');
-  await page.click('button[type="submit"]');
-});
-
-// CORRECT
-test('should login', async ({ loginPage }) => {
-  await loginPage.step_navigate();
-  await loginPage.step_login(CredentialResolver.getUser('admin'));
-});
-```
-
-### Mistake 2: Hardcoded Credentials
-
-```typescript
-// WRONG — hardcoded values
-await loginPage.step_login({ username: 'Admin', password: 'admin123' });
-
-// CORRECT — from CredentialResolver (reads JSON + .env override)
-await loginPage.step_login(CredentialResolver.getUser('admin'));
-```
-
-### Mistake 3: Missing @step Decorator
-
-```typescript
-// WRONG — no logging, invisible in output
-async step_navigate(): Promise<this> {
-  await this.page.goto(this.path);
-  return this;
-}
-
-// CORRECT
-@step
-async step_navigate(): Promise<this> {
-  await this.page.goto(this.path);
-  return this;
-}
-```
-
-### Mistake 4: Public Locators
-
-```typescript
-// WRONG — locators should be encapsulated
-public usernameInput = this.page.locator('input[name="username"]');
-
-// CORRECT
-private usernameInput = this.page.locator('input[name="username"]');
-```
-
-### Mistake 5: Importing from Wrong Source
-
-```typescript
-// WRONG — bypasses fixture system
-import { test, expect } from '@playwright/test';
-
-// CORRECT — includes custom fixtures
-import { test } from '../src/config/page.config';
-```
-
-### Mistake 5b: Scattering Imports Instead of Using page-loader
-
-```typescript
-// WRONG — multiple import sources in test files
-import { CredentialResolver } from '../src/config/data/loaders';
-import { DataLoader } from '../src/config/data/loaders';
-import { LoginExpectedFile } from '../src/config/data/interfaces';
-import { logSuite, logTest } from '../src/config/utils/decorators';
-import { DashboardPage } from '../src/gui/pages/DashboardPage';
-
-// CORRECT — one import for everything except test/expect
-import { CredentialResolver, DataLoader, LoginExpectedFile, logSuite, logTest } from '../src/config/page-loader';
-```
-
-### Mistake 6: Direct Page Instantiation (with standard fixtures)
-
-```typescript
-// WRONG
-test('scenario', async ({ page }) => {
-  const loginPage = new LoginPage(page);
-});
-
-// CORRECT
-test('scenario', async ({ loginPage }) => {
-  await loginPage.step_navigate();
-});
-```
-
-### Mistake 7: Hardcoded Environment Values
-
-```typescript
-// WRONG
-const baseUrl = process.env.BASE_URL || 'https://default.com';
-
-// CORRECT — fail fast if missing
-const baseUrl = process.env.BASE_URL!;
-```
-
-### Mistake 8: Hardcoded Expected Values in Tests
-
-```typescript
-// WRONG — hardcoded string in test
-await loginPage.verify_errorMessage('Invalid credentials');
-await dashboard.verify_pageTitle('OrangeHRM');
-
-// CORRECT — from JSON data files (tester-editable)
-const expected = DataLoader.load<LoginExpectedFile>('login/expected');
-await loginPage.verify_errorMessage(expected.errors.invalidCredentials);
-```
-
-### Mistake 9: Reading Credentials Directly from .env
-
-```typescript
-// WRONG — bypasses CredentialResolver, duplicates logic
-const username = process.env.ADMIN_USERNAME!;
-const password = process.env.ADMIN_PASSWORD!;
-
-// CORRECT — single source of truth with .env override support
-const admin = CredentialResolver.getUser('admin');
-```
-
-### Mistake 10: Forgetting to Register New Pages
-
-Creating a page object but forgetting to:
-1. Export it in `page-loader.ts`
-2. Add fixture in `page.config.ts`
-3. Add to `MyFixtures` type
-
-All three steps are required for every new page.
-
-### Mistake 11: Not Returning `this`
-
-```typescript
-// WRONG — breaks method chaining contract
-@step
-async step_navigate(): Promise<void> {
-  await this.page.goto(this.path);
-}
-
-// CORRECT
-@step
-async step_navigate(): Promise<this> {
-  await this.page.goto(this.path);
-  return this;
-}
-```
-
-### Mistake 12: Missing Logging Calls
-
-```typescript
-// WRONG — no visibility in test output
-test.describe('Suite', () => {
-  test('test name', async ({ loginPage }) => {
-    await loginPage.step_navigate();
-  });
-});
-
-// CORRECT
-test.describe('Suite', () => {
-  logSuite('Suite');
-  test('test name', async ({ loginPage }) => {
-    logTest('test name');
-    await loginPage.step_navigate();
-  });
-});
-```
-
----
-
-## 18. Troubleshooting
-
-### "Cannot find module" errors
-
-**Cause:** Path alias not configured or page not exported.
-
-**Fix:**
-1. Verify `tsconfig.json` has the alias
-2. Check `page-loader.ts` exports the module
-3. Run `npm run audit` to validate TypeScript
-
-### Tests fail with "storageState" errors
-
-**Cause:** `admin.json` is missing or corrupted.
-
-**Fix:**
-```bash
-npm run clean          # Remove stale auth state
-npm run ui:headless    # Re-runs global setup
-```
-
-### Global setup authentication fails
-
-**Cause:** Target app is down, or selectors have changed.
-
-**Fix:**
-1. Check `BASE_URL` in `.env` is accessible
-2. Run `npm run ui:debug` to step through
-3. Verify login form selectors in `global-setup.ts`
-
-### TypeScript decorator errors
-
-**Cause:** Missing decorator config in `tsconfig.json`.
-
-**Required settings:**
 ```json
 {
-  "experimentalDecorators": true,
-  "emitDecoratorMetadata": true
+  "_comment": "Test user credentials.",
+  "admin":   { "username": "Admin", "password": "admin123" },
+  "invalid": { "username": "invalid_user", "password": "wrong_password" }
 }
 ```
 
-### Tests pass locally but fail in CI
+Spec usage: `import { users } from '...'; users.admin`
 
-**Check:**
-- `retries` is set to 2 in CI (`process.env.CI ? 2 : 0`)
-- `workers` is 1 in CI (prevents race conditions)
-- `--no-sandbox` flag is set in browser launch options
-- Target application is accessible from CI environment
+### 8.2 Expected values — `expected.json`
 
----
+```json
+{
+  "_comment": "Expected UI text for <feature> assertions.",
+  "errors": { "invalidCredentials": "Invalid credentials" },
+  "labels": { "pageTitle": "OrangeHRM" }
+}
+```
 
-## 19. Project Adaptation Workflow
+Spec usage: `import { loginExpected as expected } from '...'; expected.errors.invalidCredentials`
 
-When adapting this boilerplate for a new application:
-
-| Step | Action | Files to Change |
-|------|--------|----------------|
-| 1 | Copy boilerplate | `cp -r ordino-gui-pw-project new-project` |
-| 2 | Update environment | `.env` — new `BASE_URL`, credentials |
-| 3 | Update project metadata | `package.json` — `name`, `description` |
-| 4 | Update global setup | `global-setup.ts` — login URL, selectors, success check |
-| 5 | Replace sample pages | `src/gui/pages/` — new page objects for target app |
-| 6 | Replace sample panels | `src/gui/panels/` — new components for target app |
-| 7 | Update page loader | `page-loader.ts` — export new pages/panels |
-| 8 | Update fixtures | `page.config.ts` — register new page fixtures |
-| 9 | Update test data | `src/data/` — JSON files + `src/config/data/interfaces/` |
-| 10 | Write feature tests | `features/` — new test specs |
-| 11 | Verify | `npm run audit && npm run ui:headless` |
+**Barrel re-export naming for `expected.json`:** `<feature>Expected` (e.g., `loginExpected`, `dashboardExpected`, `paymentsExpected`). Specs alias to `expected` at the import line.
 
 ---
 
-## 20. Quick Reference
+## 9. Spec template <a id="sec-spec"></a>
 
-| Aspect | Location | Key Rule |
-|--------|----------|----------|
-| **Config** | `.env` | Single source of truth, no fallback defaults |
-| **Base Class** | `src/gui/pages/BasePage.ts` | Immutable — all pages extend this |
-| **Page Objects** | `src/gui/pages/*.ts` | Extend BasePage, `@step`, `step_*/verify_*`, return `this` |
-| **Panels** | `src/gui/panels/*.ts` | No BasePage, compose into pages |
-| **Test Data (JSON)** | `src/data/` | Tester-editable JSON files, no TS needed |
-| **Data Interfaces** | `src/config/data/interfaces/` | TypeScript shape definitions |
-| **Data Loaders** | `src/config/data/loaders/` | `DataLoader` + `CredentialResolver` |
-| **Tests** | `features/*.spec.ts` | Sequential await, fixture injection, `logSuite/logTest` |
-| **Fixtures** | `src/config/page.config.ts` | Centralized, exports `test` and `expect` |
-| **Page Registry** | `src/config/page-loader.ts` | Barrel exports — single import source |
-| **Decorators** | `src/config/utils/decorators.ts` | `@step` + logging utilities |
-| **Auth Setup** | `src/config/utils/global-setup.ts` | Pre-test auth, saves `admin.json` |
-| **TS Config** | `tsconfig.json` | Strict mode, 6 path aliases, decorators enabled |
-| **PW Config** | `playwright.config.ts` | Chromium only, CI-aware retries/workers |
+```ts
+import { test } from '../src/config/page.config';
+import { users, loginExpected as expected } from '../src/config/page-loader';
+
+test.describe('<App-or-Feature> - <Area>', () => {
+  test('<should do observable thing>', async ({ loginPage, dashboardPage }) => {
+    await loginPage.step_navigate();
+    await loginPage.step_login(users.admin);
+    await dashboardPage.verify_onDashboard();
+    await dashboardPage.verify_pageTitle(expected.labels.pageTitle);
+  });
+});
+```
+
+**Spec rules:**
+- Exactly two import lines: `test` from `page.config`, plus barrel imports.
+- Alias the matching `<feature>Expected` to `expected` at the import line.
+- Do **not** destructure data into local consts (`const { users } = ...`). The barrel exposes the shape directly.
+- Do **not** call `expect` directly in a test body. Wrap assertions inside `verify_*` methods on page objects.
+- Do **not** call `new <Page>(...)` inside a test. Add a fixture if one is missing.
+- **Single-line fixture destructure.** Even when long:
+  - ✅ `async ({ loginPage, dashboardPage, paymentsPage, profilePage, settingsPage }) => {`
+  - ❌
+    ```ts
+    async ({
+      loginPage,
+      dashboardPage,
+      paymentsPage,
+    }) => {
+    ```
 
 ---
 
-## Versioning
+## 10. Naming & style <a id="sec-naming"></a>
 
-- **Skill Version:** 2.0
-- **Last Updated:** March 25, 2026
-- **Compatible with:** Playwright 1.55+, TypeScript 5.9+, Node 18+
-- **Dependencies:** `@playwright/test`, `typescript`, `dotenv`, `@types/node`
+- **Class names:** PascalCase, suffix `Page` or `Panel`.
+- **Method names:** `step_<verbPhrase>` or `verify_<thing>`. Snake-prefix is intentional — groups behavior in IDE autocomplete.
+- **File names:** match the class name verbatim (`LoginPage.ts`).
+- **Locator fields:** `private`, camelCase, suffix matches the element kind (`usernameInput`, `loginButton`, `errorMessage`).
+- **Blank lines:** one blank line between method groups (locators / `step_` / `verify_`).
+- **Always `await`** Playwright calls. Never chain promise methods (`.then(...)`) in tests.
+- **Spec describe titles:** `'<App-or-Feature> - <Area>'`.
+- **Spec test titles:** start with `should <observable behavior>`.
+- **Horizontal parameter lists.** Fixture destructure, method signatures, and constructor parameter lists stay on a single line — even when the list grows. Multi-line vertical layouts of parameters are forbidden.
+
+---
+
+## 11. Decision rules <a id="sec-decisions"></a>
+
+| Question | Rule |
+|---|---|
+| New utility shared across multiple pages — `BasePage` or page object? | `BasePage` only if it's selector-agnostic and applies to *every* page. If it touches a specific element shape, it belongs in a page object or panel. |
+| Reusable UI region appears on multiple pages — page or panel? | Panel. Pages own URLs and lifecycles; panels own a region of DOM. |
+| New data structure — type, JSON, or barrel? | Static test data → JSON under `src/data/<feature>/`. Tiny shape used only by one page object → exported `type` colocated in that file. Never invent a "wrapper" interface for a JSON shape. |
+| Need to log in for a test — global state or inline? | Always inline via `loginPage.step_login(...)`. Do not add `globalSetup`, `storageState` files, or an `authenticatedPage` fixture. |
+| Want collapsible steps in the HTML reporter? | Use Playwright's native `await test.step('...', async () => { ... })` inside the page object method. Do not introduce a method decorator. |
+| New env var? | Add to `.env`, read via `process.env.X`. Do not introduce a config wrapper class. |
+| Test needs to assert something not on a page object yet? | Add a `verify_*` method to the page object first, then call it from the test. No bare `expect(...)` in the spec body. |
+| Fixture destructure list grew long, want to wrap to multiple lines? | No. Keep it horizontal. If it really feels too long, the test is doing too much — split into smaller tests rather than reformatting. |
+
+---
+
+## 12. Scenario → code mapping <a id="sec-mapping"></a>
+
+Given a natural-language scenario, derive the file set deterministically.
+
+### 12.1 Vocabulary
+
+| Scenario phrase | Maps to |
+|---|---|
+| "the login page", "the dashboard", "the payments screen" | A **page object**: `LoginPage`, `DashboardPage`, `PaymentsPage`. One page = one class. |
+| "the header", "the side menu", "the footer" (appears on multiple pages) | A **panel**: `HeaderPanel`, `SideMenuPanel`, `FooterPanel`. |
+| "user clicks", "user fills", "user navigates", "user submits" | A **`step_*` method** on the page or panel that owns the affected element. |
+| "user sees", "is shown", "verify", "should display", "expect" | A **`verify_*` method** on the page or panel that owns the asserted element. |
+| "as <role>" / "as <user-type>" credentials | An entry in the feature's `users.json` (`admin`, `invalid`, `customer`, …). |
+| Concrete UI text the test asserts ("Invalid credentials", "Welcome, Admin") | A field in the feature's `expected.json` under `errors`, `labels`, or `messages`. |
+| "given …, when …, then …" Gherkin shape | Tests are written as plain Playwright `test(...)` blocks; phases become a sequence of `step_*` calls followed by `verify_*` calls. |
+
+### 12.2 Derivation rules
+
+For each scenario:
+
+1. **Pick a feature name.** Use the noun the scenario centers on (`login`, `dashboard`, `payments`). Lowercase, kebab-case if multi-word.
+2. **Identify pages touched.** Each distinct screen = a page object class named `<Feature>Page` (PascalCase + `Page`).
+3. **Identify shared regions.** Anything visible on more than one page = a panel `<Name>Panel`.
+4. **Identify data:**
+   - Credentials → `src/data/<feature>/users.json` with one key per user role.
+   - Expected text → `src/data/<feature>/expected.json` keyed by `errors`, `labels`, or `messages`.
+5. **Map verbs to methods:** every action verb in the scenario → a `step_<verb>` method on the relevant page; every "see/verify/expect" → a `verify_<thing>` method.
+6. **Wire into the framework:**
+   - Append page-object re-export to `src/config/page-loader.ts`.
+   - Append `<feature>Expected` JSON re-export to `page-loader.ts`.
+   - Append fixture entry to `src/config/page.config.ts` (type + wrapper).
+7. **Write the spec:** one `<feature>.spec.ts` in `features/`. One `test.describe` per feature, one `test(...)` per scenario.
+
+### 12.3 Naming derivations
+
+| Concept | From feature name `payments` |
+|---|---|
+| Folder | `src/data/payments/` |
+| Page class & file | `PaymentsPage` in `src/gui/pages/PaymentsPage.ts` |
+| Fixture key (camelCase) | `paymentsPage` |
+| Barrel data export | `paymentsExpected` (and optional `paymentsUsers`, but typically just `users` if only one feature has credentials) |
+| Spec file | `features/payments.spec.ts` |
+| Spec describe title | `'<App> - Payments'` |
+
+---
+
+## 13. Worked example: from scenarios to passing tests <a id="sec-worked"></a>
+
+Inputs the tester is given:
+
+```
+.env:
+  BASE_URL=https://demo.app.example.com
+
+Scenarios:
+  1. As an admin, when I log in with valid credentials, I land on the dashboard
+     and see my profile name in the header.
+  2. When I log in with invalid credentials, I see the error "Invalid credentials".
+```
+
+### 13.1 Derive
+
+- Feature names: `login`, `dashboard`.
+- Pages: `LoginPage`, `DashboardPage`.
+- Panel (header appears on dashboard, will appear on others): `HeaderPanel`.
+- Data:
+  - `src/data/login/users.json` — keys `admin`, `invalid`.
+  - `src/data/login/expected.json` — `errors.invalidCredentials`.
+  - `src/data/dashboard/expected.json` — `labels.pageTitle`.
+- Methods:
+  - `LoginPage.step_navigate`, `step_login(credentials)`, `verify_errorMessage(text)`.
+  - `DashboardPage.step_navigate`, `verify_onDashboard()`, `verify_pageTitle(text)`, `verify_profileName()`.
+  - `HeaderPanel.getProfileName()`.
+
+### 13.2 Files to create
+
+In order:
+
+1. `src/data/login/users.json` — see §[data](#sec-data).
+2. `src/data/login/expected.json` — see §[data](#sec-data).
+3. `src/data/dashboard/expected.json` — see §[data](#sec-data).
+4. `src/gui/panels/HeaderPanel.ts` — see §[panel](#sec-panel).
+5. `src/gui/pages/LoginPage.ts` — see §[page-object](#sec-page-object).
+6. `src/gui/pages/DashboardPage.ts` — same shape as §[page-object](#sec-page-object), composing `HeaderPanel`.
+7. `src/config/page-loader.ts` — append page-object, panel, and JSON re-exports.
+8. `src/config/page.config.ts` — add `loginPage` and `dashboardPage` fixtures.
+9. `features/login.spec.ts`:
+   ```ts
+   import { test } from '../src/config/page.config';
+   import { users, loginExpected as expected } from '../src/config/page-loader';
+
+   test.describe('Demo App - Login', () => {
+     test('should log in successfully and verify profile name', async ({ loginPage, dashboardPage }) => {
+       await loginPage.step_navigate();
+       await loginPage.step_login(users.admin);
+       await dashboardPage.verify_onDashboard();
+       await dashboardPage.verify_profileName();
+     });
+
+     test('should show error for invalid credentials', async ({ loginPage }) => {
+       await loginPage.step_navigate();
+       await loginPage.step_login(users.invalid);
+       await loginPage.verify_errorMessage(expected.errors.invalidCredentials);
+     });
+   });
+   ```
+10. `features/dashboard.spec.ts` if dashboard scenarios stand alone, otherwise combine into `login.spec.ts`.
+
+### 13.3 Verify
+
+Run §[validate](#sec-validate). All checks must pass.
+
+---
+
+## 14. Add-a-feature checklist <a id="sec-add-feature"></a>
+
+For each new feature `<feature>` with page `<Feature>Page`:
+
+1. `src/data/<feature>/expected.json` — keys grouped by `errors`/`labels`/`messages`. Add `users.json` only if new credentials are needed.
+2. `src/gui/pages/<Feature>Page.ts` — extend `BasePage`; methods follow §[page-object](#sec-page-object).
+3. `src/config/page-loader.ts` — append page-object re-export and `<feature>Expected` JSON re-export. Single-line exports only.
+4. `src/config/page.config.ts` — add `<feature>Page: <Feature>Page` to fixture type and one fixture wrapper.
+5. `features/<feature>.spec.ts` — follow §[spec](#sec-spec). Use `<feature>Expected as expected`.
+6. Run `npm run audit` — must pass.
+7. Run `npm run ui:headless` — must pass.
+8. Run validation recipes in §[validate](#sec-validate) — all must pass.
+
+If any step requires touching `BasePage.ts`, stop and reconsider — the change probably belongs in the page object.
+
+---
+
+## 15. Anti-patterns — DO NOT introduce <a id="sec-anti"></a>
+
+Each line is a grep target for §[validate](#sec-validate). Reintroducing any of these is a regression.
+
+- Custom logger functions (`logSuite`, `logTest`, `logField`, `logUrl`, `logSep`, `logSuccess`).
+- A `@step` method decorator wrapping `console.log`. Use `await test.step(...)` instead.
+- A `global-setup.ts` that pre-authenticates and saves `storageState`. Log in inline.
+- A runtime `DataLoader` class reading JSON via `fs.readFileSync`. Use `import` with `resolveJsonModule`.
+- A `CredentialResolver` class wrapping `users.json`. Specs read `users.<key>` from the barrel directly.
+- An `authenticatedPage` fixture wrapping `browser.newContext({ storageState })`. Log in inside the test.
+- Wrapper interfaces over JSON shapes (`LoginExpectedFile`, `LoginUsersFile`, etc.). Type inference from `resolveJsonModule` is sufficient.
+- A `@data/*` path alias. Test data flows only via the barrel.
+- `experimentalDecorators` / `emitDecoratorMetadata` in `tsconfig.json`.
+- Destructuring barrel data into local consts at the top of a spec (`const { users } = ...`).
+- Direct `expect(...)` calls in spec bodies.
+- **Multi-line / vertical parameter lists.** Fixture destructures and function signatures stay on one line, regardless of length.
+
+---
+
+## 16. Validation recipes <a id="sec-validate"></a>
+
+Run after any change. Cheap; use them to self-check.
+
+### 16.1 Type check
+
+```bash
+npm run audit
+```
+
+Must exit `0` with no diagnostics.
+
+### 16.2 Anti-pattern grep
+
+```bash
+# Each must return zero hits
+grep -rn "logSep\|logField\|logUrl\|logSuccess\|logSuite\|logTest" src features
+grep -rn "@step\b\|class .*Decorator\b" src features
+grep -rn "DataLoader\|CredentialResolver" src features
+grep -rn "authenticatedPage\|globalSetup" src features playwright.config.ts
+grep -rn "experimentalDecorators\|emitDecoratorMetadata" tsconfig.json
+grep -rn "@data/" src features tsconfig.json
+```
+
+### 16.3 Spec import discipline
+
+```bash
+for f in features/*.spec.ts; do
+  echo "$f: $(grep -c '^import ' "$f") imports"
+done
+```
+
+Every spec must report `2 imports`.
+
+### 16.4 Method-naming discipline
+
+```bash
+grep -rn "^\s*async \([a-z][a-zA-Z]*\)" src/gui | grep -v "step_\|verify_\|get[A-Z]\|wait[A-Z]\|attach[A-Z]\|open[A-Z]"
+```
+
+Should return zero hits.
+
+### 16.5 Horizontal-parameter-list check
+
+```bash
+# Catches fixture destructures broken across lines
+grep -rn "async ({\s*$" src features
+# Catches method signatures opened with `(` and broken across lines
+grep -rn "(\s*$" src/gui features
+```
+
+Should return zero hits.
+
+### 16.6 Runtime smoke
+
+```bash
+npm run ui:headless
+```
+
+Full suite must pass against `BASE_URL`. Only check that requires a live target.
+
+A skill application that fails any of §16.1–16.5 is non-conforming regardless of whether §16.6 passes.
+
+---
+
+## 17. Versioning & change policy
+
+- **Breaking changes** to §[contract](#sec-contract) or §[rules](#sec-rules) bump the major version.
+- **Additive changes** (new templates, new decision rules, new validation recipes) bump the minor version.
+- **Editorial changes** update only the `updated:` date.
+- §[anti](#sec-anti) is append-only — once a pattern is forbidden, future versions do not re-permit it without a major bump.
+
+When this skill is consumed via an MCP server in `resources` mode, the server SHOULD expose `version` and `updated` from the frontmatter as resource metadata so consumers detect drift between cached and fresh fetches. Clients SHOULD treat the file as a single resource (fragment anchors in §[anchors](#sec-contract) only — no sub-resources).
